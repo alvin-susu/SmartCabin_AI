@@ -181,7 +181,7 @@ class PdfParser:
                     self.context.append(cur + sentence + "。")
                     # 前后衔接 滑动窗口长度为 len(sentences[slow] + "。") 到 末尾，排除上一句，添加下一句
                     cur = cur[len(sentences[slow] + "。"):]
-                    print(f"第{len(self.context)}块数据为:{cur}")
+                    # print(f"第{len(self.context)}块数据为:{cur}")
                     slow = slow + 1
                 cur = cur + sentence + "。"
                 fast = fast + 1
