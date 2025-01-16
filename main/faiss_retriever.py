@@ -117,6 +117,8 @@ else:
     )
 
 # 查询向量
-results = vector_store.similarity_search("申请成果积分创新成果介绍", k=2)
-for res in results:
-    print(f"* {res.page_content} [{res.metadata}]")
+if __name__ == "__main__":
+    results = vector_store.similarity_search("申请成果积分创新成果介绍", k=2)
+    for res in results:
+        print(f"* {res.page_content} [{res.metadata}]")
+
