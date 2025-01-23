@@ -17,7 +17,6 @@ pdf 解析方法
 class PdfParser:
     def __init__(self, path):
         self.pdf_path = path
-        self.max_seq = 1024
         self.context = []
 
     def get_header(self, page):
@@ -59,7 +58,7 @@ class PdfParser:
 
         return outline_data
 
-    def data_filter(self, sequence):
+    def data_filter(self, sequence, max_seq):
         """
         过滤并组织文档块。
         :param sequence: 当前的文档块字符串。
@@ -73,11 +72,11 @@ class PdfParser:
 
         blocks = []
 
-        while len(sequence) > self.max_seq:
+        while len(sequence) > max_seq:
             # 找到前 max_seq 个字符的最后一个换行符或空格，尽量按自然段切分
             split_index = max(
-                sequence.rfind("\n", 0, self.max_seq),
-                sequence.rfind(" ", 0, self.max_seq)
+                sequence.rfind("\n", 0, max_seq),
+                sequence.rfind(" ", 0, max_seq)
             )
 
             # 取出当前块并加入块列表
@@ -216,7 +215,20 @@ class PdfParser:
                         else:
                             cur = cur + sentence
 if __name__ == "__main__":
-    parser = PdfParser("../data/train_a.pdf")
-    parser.parse_not_sliding_window(max_seq=512, min_len=6)
-    for context in parser.context:
-        print(context)
+    dp =  PdfParser(pdf_path = "./data/train_a.pdf")
+    dp.ParseBlock(max_seq = 1024)
+    dp.ParseBlock(max_seq = 512)
+    print(len(dp.data))
+    dp.ParseAllPage(max_seq = 256)
+    dp.ParseAllPage(max_seq = 512)
+    print(len(dp.data))
+    dp.ParseOnePageWithRule(max_seq = 256)
+    dp.ParseOnePageWithRule(max_seq = 512)
+    print(len(dp.data))
+    data = dp.data
+    out = open("all_text.txt", "w")
+    for line in data:
+        line = line.strip("\n")
+        out.write(line)
+        out.write("\n")
+    out.close()
