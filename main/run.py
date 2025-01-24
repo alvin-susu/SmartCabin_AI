@@ -4,7 +4,9 @@ from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 
 from common.pdf_parse import PdfParser
+from main.bm25_retriever import BestMatch25Retriever
 from main.faiss_retriever import FaissRetriever
+from main.vllm_model import ChatLLM
 
 
 # 获取langchain的工具链
@@ -106,9 +108,15 @@ if __name__ == "__main__":
     vector_store = faiss_retriever.get_vector()
     print("faiss_retriever load ok")
     # BM25召回
+    bm25_retriever = BestMatch25Retriever(pdf_path)
+    print("bm25 load ok")
 
     # LLM大模型
+    llm = ChatLLM(qwen7)
+    print("llm qwen load ok")
 
     # reRank模型
+    rerank = reRankLLM(bge_reranker_large)
+    print("rerank model load ok")
 
     # 对每一条测试问题做答案生成处理
