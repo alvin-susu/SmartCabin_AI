@@ -62,6 +62,7 @@ class PdfParser:
         """
         过滤并组织文档块。
         :param sequence: 当前的文档块字符串。
+        :param max_seq: 最大序列长度
         """
         # 清理文本 去掉不需要的字符
         sequence = sequence.strip()
@@ -86,10 +87,10 @@ class PdfParser:
         # 添加最后剩余的内容
         if sequence:
             blocks.append(sequence)
-        print(blocks)
+        # print(f"保存的当前块内容为:{blocks}")
         self.context.extend(blocks)
 
-    def parse_block(self):
+    def parse_block(self, max_seq):
         with pdfplumber.open(self.pdf_path) as pdf:
             for page_index, page in enumerate(pdf.pages):
                 # 根据页数获取其所在目录
@@ -115,7 +116,7 @@ class PdfParser:
                         continue
                     elif text == "警告！" or text == "注意！" or text == "说明！":
                         if len(sequence) > 0:
-                            self.data_filter(sequence)
+                            self.data_filter(sequence, max_seq)
                         sequence = ""
                     elif format(last_size, ".5f") == format(cur_size, ".5f"):
                         if len(sequence) > 0:
@@ -128,10 +129,10 @@ class PdfParser:
                             sequence = sequence + text
                         else:
                             if len(sequence) > 0:
-                                self.data_filter(sequence)
+                                self.data_filter(sequence, max_seq)
                             sequence = text
                 if len(sequence) > 0:
-                    self.data_filter(sequence)
+                    self.data_filter(sequence, max_seq)
 
     def parse_sliding_window(self, max_seq=512, min_len=6):
         """
@@ -187,7 +188,7 @@ class PdfParser:
 
     def parse_not_sliding_window(self, max_seq=512, min_len=6):
         """
-        pdf非滑窗法解析，把文档句号分割，然后按照文档块预设尺寸均匀切分，其中文档块的长度分别是256和512。
+        pdf非滑窗法解析，把文档句号分割，然后利用最大长度划分文档块
         :return:
         """
         with pdfplumber.open(self.pdf_path) as pdf:
@@ -205,30 +206,36 @@ class PdfParser:
                 if len(page_content) < max_seq:
                     if page_content not in self.context:
                         self.context.append(page_content)
+                        # print(f"以句号分割的当前块内容为:{page_content}")
                 else:
                     sentences = page_content.split("。")
                     cur = ""
                     for sentence_index, sentence in enumerate(sentences):
                         if len(cur + sentence) > max_seq and (cur + sentence) not in self.context:
+                            # print(f"以句号分割的当前块内容为:{cur + sentence}")
                             self.context.append(cur + sentence)
                             cur = sentence
                         else:
                             cur = cur + sentence
+
+
 if __name__ == "__main__":
-    dp =  PdfParser(pdf_path = "./data/train_a.pdf")
-    dp.ParseBlock(max_seq = 1024)
-    dp.ParseBlock(max_seq = 512)
-    print(len(dp.data))
-    dp.ParseAllPage(max_seq = 256)
-    dp.ParseAllPage(max_seq = 512)
-    print(len(dp.data))
-    dp.ParseOnePageWithRule(max_seq = 256)
-    dp.ParseOnePageWithRule(max_seq = 512)
-    print(len(dp.data))
-    data = dp.data
-    out = open("all_text.txt", "w")
-    for line in data:
-        line = line.strip("\n")
-        out.write(line)
-        out.write("\n")
-    out.close()
+    pdf_path = "../knowledge_data/pdf/train_a.pdf"
+    pdf_parse = PdfParser(pdf_path)
+    # pdf_parse.parse_block(max_seq=1024)
+    # pdf_parse.parse_block(max_seq=512)
+    # print("固定分块的方式解析手册的总块数为{}".format(len(pdf_parse.context)))
+    # pdf_parse.parse_sliding_window(max_seq=256)
+    # pdf_parse.parse_sliding_window(max_seq=512)
+    # print("滑动窗口的方式解析手册的总块数为:{}".format(len(pdf_parse.context)))
+    pdf_parse.parse_not_sliding_window(max_seq=256)
+    print("非滑动窗口的方式以句号分割解析手册的总块数为:{}".format(len(pdf_parse.context)))
+    pdf_parse.parse_not_sliding_window(max_seq=512)
+    print("非滑动窗口的方式以句号分割解析手册的总块数为:{}".format(len(pdf_parse.context)))
+    # data = dp.data
+    # out = open("all_text.txt", "w")
+    # for line in data:
+    #     line = line.strip("\n")
+    # out.write(line)
+    # out.write("\n")
+    # out.close()
