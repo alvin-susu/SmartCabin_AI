@@ -4,6 +4,7 @@ from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 
 from common.pdf_parse import PdfParser
+from main.faiss_retriever import FaissRetriever
 
 
 # 获取langchain的工具链
@@ -85,13 +86,25 @@ if __name__ == "__main__":
     qwen7 = "../pre_trained_models/Qwen/Qwen-7B-Chat"
     m3e = "../pre_trained_models/moka-ai/m3e-base"
     bge_reranker_large = "../pre_trained_models/BAAI/bge-reranker-large"
-    pdf_path = "../knowledge_data/pdf/LLM-TAP.pdf"
+    pdf_path = "../knowledge_data/pdf/train_a.pdf"
 
     # 解析pdf文档，构造数据
     pdf_parser = PdfParser(pdf_path)
-
+    pdf_parser.parse_block(max_seq=1024)
+    pdf_parser.parse_block(max_seq=512)
+    print(len(pdf_parser.context))
+    pdf_parser.parse_sliding_window(max_seq=512)
+    pdf_parser.parse_sliding_window(max_seq=256)
+    print(len(pdf_parser.context))
+    pdf_parser.parse_not_sliding_window(max_seq=512)
+    pdf_parser.parse_not_sliding_window(max_seq=256)
+    print(len(pdf_parser.context))
+    data = pdf_parser.context
+    print("data load ok")
     # Faiss召回
-
+    faiss_retriever = FaissRetriever(pdf_path)
+    vector_store = faiss_retriever.get_vector()
+    print("faiss_retriever load ok")
     # BM25召回
 
     # LLM大模型

@@ -1,11 +1,12 @@
 import io
 import json
 import os
-
+import torch
 import faiss
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from tqdm import tqdm
 
 from common.pdf_parse import PdfParser
 from pre_train_model.m3e_large import SentenceTransformerEmbeddings
@@ -52,39 +53,41 @@ M3E共有以下三种模型：small, base, large。本项目采用的是M3E larg
 映射关系：在向量检索中，FAISS 索引只存储了向量，而不存储向量对应的原始文档内容。如果没有映射关系，我们就无法从检索结果中找到原始文档。
 """
 
+
 # index = faiss.IndexFlatL2(len(m3e_embeddings.embed_query("hello world")))
 #
+class FaissRetriever(object):
+    def __init__(self, path):
+        self.vector_store = get_faiss_embedding(path)
+        torch.cuda.empty_cache()
+
+    # 获取top-K分数最高的文档块
+    def get_top_k(self, query, k):
+        context = self.vector_store.similarity_search_with_score(query, k=k)
+        return context
+
+    def get_vector(self):
+        return self.vector_store
+
 
 # 加载pdf文件
-pdfParser = PdfParser('../data/test.pdf')
-pdfParser.parse_sliding_window()
-context_list = pdfParser.context
+def _pdf_load(path: str):
+    pdf_parser = PdfParser(path)
+    pdf_parser.parse_block(max_seq=1024)
+    pdf_parser.parse_block(max_seq=512)
+    print(len(pdf_parser.context))
+    pdf_parser.parse_sliding_window(max_seq=512)
+    pdf_parser.parse_sliding_window(max_seq=256)
+    print(len(pdf_parser.context))
+    pdf_parser.parse_not_sliding_window(max_seq=512)
+    pdf_parser.parse_not_sliding_window(max_seq=256)
+    print(len(pdf_parser.context))
+    print("load pdf over~")
+    return pdf_parser.context
 
-# 创建或加载索引
-index_bin_name = "faiss_index_m3e.bin"
-index_path = "../vector_db"
-index_file = os.path.join(index_path, index_bin_name)
 
-if not os.path.exists(index_path):
-    os.makedirs(index_path)
-
-# 加载m3e模型
-embedding_model = SentenceTransformerEmbeddings()
-
-# 索引文件不存在
-if index_bin_name not in os.listdir(index_path):
-
-    # 分词处理 利用m3e-large将加载数据变为稠密向量
-    embeddings = [embedding_model.embed_documents(context) for context in context_list]
-
-    # 创建索引
-    # 向量的维度
-    dimension = len(embeddings[0])
-    # 使用L2距离度量
-    index = faiss.IndexFlatL2(dimension)
-
-    # 创建向量存储
-    vector_store = FAISS(
+def _get_vector_store(embedding_model, index, context_list):
+    return FAISS(
         embedding_function=embedding_model,
         index=index,
         docstore=InMemoryDocstore(
@@ -93,32 +96,61 @@ if index_bin_name not in os.listdir(index_path):
         index_to_docstore_id={i: str(i) for i in range(len(context_list))},
     )
 
-    # 添加文本和向量到向量存储
-    vector_store.add_texts(
-        texts=context_list,
-        embeddings=embeddings
-    )
 
-    faiss.write_index(index, os.path.join(index_path, index_bin_name))
-    print("创建索引文件成功！")
-else:
-    # 索引文件存在
-    index = faiss.read_index(os.path.join(index_path, index_bin_name))
-    print("加载索引文件成功！")
+def get_faiss_embedding(path: str):
+    # 创建或加载索引
+    index_bin_name = "faiss_index_m3e.bin"
+    index_path = "../vector_db"
+    # 加载pdf文档
+    context_list = _pdf_load(path)
 
-    # 恢复向量存储
-    vector_store = FAISS(
-        embedding_function=embedding_model,
-        index=index,
-        docstore=InMemoryDocstore(
-            {str(i): Document(page_content=context_list[i], metadata={id: i}) for i in range(len(context_list))}
-        ),
-        index_to_docstore_id={i: str(i) for i in range(len(context_list))},
-    )
+    if not os.path.exists(index_path):
+        os.makedirs(index_path)
+
+    # 加载m3e模型
+    embedding_model = SentenceTransformerEmbeddings()
+
+    # 索引文件不存在
+    if index_bin_name not in os.listdir(index_path):
+
+        print("开始将文本转换为向量...")
+        # 分词处理 利用m3e-large将加载数据变为稠密向量
+        embeddings = []
+        # 使用 tqdm 显示整体进度
+        with tqdm(total=len(context_list), desc="整体进度", unit="文档") as pbar:
+            for context in context_list:
+                embeddings.append(embedding_model.embed_documents(context))
+                pbar.update(1)  # 更新进度条
+
+        # 创建索引
+        # 向量的维度
+        dimension = len(embeddings[0])
+        # 使用L2距离度量
+        index = faiss.IndexFlatL2(dimension)
+
+        # 创建向量存储
+        vector_store = _get_vector_store(embedding_model, index, context_list)
+        # 添加文本和向量到向量存储
+        vector_store.add_texts(
+            texts=context_list,
+            embeddings=embeddings
+        )
+
+        faiss.write_index(index, os.path.join(index_path, index_bin_name))
+        print("创建索引文件成功！")
+    else:
+        # 索引文件存在
+        index = faiss.read_index(os.path.join(index_path, index_bin_name))
+        print("加载索引文件成功！")
+
+        # 恢复向量存储
+        vector_store = _get_vector_store(embedding_model, index, context_list)
+    return vector_store
+
 
 # 查询向量
 if __name__ == "__main__":
-    results = vector_store.similarity_search("申请成果积分创新成果介绍", k=2)
+    vector_store = get_faiss_embedding(path="../knowledge_data/pdf/train_a.pdf")
+    results = vector_store.similarity_search("如何预防新冠肺炎", k=2)
     for res in results:
         print(f"* {res.page_content} [{res.metadata}]")
-

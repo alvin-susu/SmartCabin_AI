@@ -4,7 +4,7 @@ from sentence_transformers import SentenceTransformer
 
 class SentenceTransformerEmbeddings(Embeddings):
     def __init__(self):
-        self.model = SentenceTransformer("moka-ai/m3e-large")
+        self.model = SentenceTransformer("moka-ai/m3e-base")
 
     def embed_query(self, query: str) -> list:
         """
@@ -12,7 +12,7 @@ class SentenceTransformerEmbeddings(Embeddings):
         :param query:  查询
         :return: 向量
         """
-        return self.model.encode(query, show_progress_bar=True, convert_to_numpy=True).tolist()
+        return self.model.encode(query, show_progress_bar=False, convert_to_numpy=True).tolist()
 
     def embed_documents(self, documents: list) -> list:
         """
@@ -20,5 +20,5 @@ class SentenceTransformerEmbeddings(Embeddings):
         :param documents:
         :return:
         """
-        return self.model.encode(documents, show_progress_bar=True, convert_to_numpy=True).tolist()
+        return self.model.encode(documents, show_progress_bar=False, convert_to_numpy=True).tolist()
 
