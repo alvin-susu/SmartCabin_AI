@@ -48,6 +48,8 @@ class ReRankModel(object):
         torch_gc()
         return response
 
+
 if __name__ == "__main__":
     bge_reranker_large = "../pre_train_model/BAAI/bge-reranker-large"
     rerank = ReRankModel(bge_reranker_large)
+    print(rerank)

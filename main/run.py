@@ -1,3 +1,4 @@
+import json
 import time
 
 from langchain.chains.retrieval_qa.base import RetrievalQA
@@ -6,6 +7,7 @@ from langchain_core.prompts import PromptTemplate
 from common.pdf_parse import PdfParser
 from main.bm25_retriever import BestMatch25Retriever
 from main.faiss_retriever import FaissRetriever
+from main.re_rank_model import ReRankModel
 from main.vllm_model import ChatLLM
 
 
@@ -48,8 +50,9 @@ def get_emb_bm25_merge(faiss_context, bm25_context, query):
                                 1: {emb_ans}
                                 2: {bm25_ans}
                                 问题:
-                                {question}""".format(emb_ans=emb_ans, bm25_ans = bm25_ans, question = query)
+                                {question}""".format(emb_ans=emb_ans, bm25_ans=bm25_ans, question=query)
     return prompt_template
+
 
 def get_rerank(emb_ans, query):
     prompt_template = """基于以下已知信息，简洁和专业的来回答用户的问题。
@@ -57,8 +60,9 @@ def get_rerank(emb_ans, query):
                                 已知内容为吉利控股集团汽车销售有限公司的吉利用户手册:
                                 1: {emb_ans}
                                 问题:
-                                {question}""".format(emb_ans=emb_ans, question = query)
+                                {question}""".format(emb_ans=emb_ans, question=query)
     return prompt_template
+
 
 def question(text, llm, vector_store, prompt_template):
     chain = get_qa_chain(llm, vector_store, prompt_template)
@@ -66,7 +70,7 @@ def question(text, llm, vector_store, prompt_template):
     return response
 
 
-def rerank(re_rank, top_k, query, bm25_ans, faiss_ans):
+def re_rank_method(re_rank, top_k, query, bm25_ans, faiss_ans):
     items = []
     max_length = 4000
     for doc, score in faiss_ans:
@@ -82,6 +86,7 @@ def rerank(re_rank, top_k, query, bm25_ans, faiss_ans):
         emb_ans = emb_ans + doc.page_content
     return emb_ans
 
+
 if __name__ == "__main__":
     start = time.time()
 
@@ -89,6 +94,7 @@ if __name__ == "__main__":
     m3e = "../pre_trained_models/moka-ai/m3e-base"
     bge_reranker_large = "../pre_trained_models/BAAI/bge-reranker-large"
     pdf_path = "../knowledge_data/pdf/train_a.pdf"
+    test_question_path = "../knowledge_data/json/test_question.json"
 
     # 解析pdf文档，构造数据
     pdf_parser = PdfParser(pdf_path)
@@ -116,7 +122,102 @@ if __name__ == "__main__":
     print("llm qwen load ok")
 
     # reRank模型
-    rerank = reRankLLM(bge_reranker_large)
+    rerank = ReRankModel(bge_reranker_large)
     print("rerank model load ok")
 
     # 对每一条测试问题做答案生成处理
+    with open(test_question_path, "r") as f:
+        jdata = json.load(f)
+        print(jdata)
+        max_length = 4000
+        for idx, line in enumerate(jdata):
+            query = line["question"]
+
+            # faiss召回top_k
+            """
+            faiss_context 例子如下：
+            [
+                (Document(page_content="座椅加热使用方法", metadata={"id": 2}), 0.95),
+                (Document(page_content="前排座椅加热功能", metadata={"id": 0}), 0.90),
+                (Document(page_content="安全出行指南", metadata={"id": 1}), 0.85)
+            ]
+            """
+            faiss_context = faiss_retriever.get_top_k(query, 15)
+            faiss_min_score = 0.0
+            if len(faiss_context) > 0:
+                # 从faiss检索器返回的结果中提取相关新得分
+                faiss_min_score = faiss_context[0][1]
+
+            cnt = 0
+            emb_ans = ""
+            for doc, score in faiss_context:
+                cnt = cnt + 1
+                # 最长选择max_length
+                if len(emb_ans + doc.page_content) > max_length:
+                    break
+
+                emb_ans = emb_ans + doc.page_content
+                # 最多选择6个
+                if cnt > 6:
+                    break
+
+            # bm25召回top_k
+            bm25_context = bm25_retriever.get_bm25_top_k(query, 15)
+            bm25_ans = ""
+            cnt = 0
+            for doc in bm25_context:
+                cnt = cnt + 1
+                if len(bm25_ans + doc.page_content) > max_length:
+                    break
+                bm25_ans = bm25_ans + doc.page_content
+                # 最多选择6个
+                if cnt > 6:
+                    break
+
+            # 构造合并bm25召回和向量召回的prompt
+            emb_bm25_merge_inputs = get_emb_bm25_merge(faiss_context, bm25_context, query)
+
+            # 构造bm25召回的prompt
+            bm25_inputs = get_rerank(bm25_ans, query)
+
+            # 构建向量召回的prompt
+            emb_inputs = get_rerank(emb_ans, query)
+
+            # rerank召回的候选，并按照相关性得分排序
+            rerank_ans = re_rank_method(emb_bm25_merge_inputs, 6, bm25_inputs, emb_inputs)
+
+            # 构造得到rerank后生成答案的prompt
+            re_rank_inputs = get_rerank(rerank_ans, query)
+
+            batch_input = []
+            batch_input.append(emb_bm25_merge_inputs)
+            batch_input.append(bm25_inputs)
+            batch_input.append(emb_inputs)
+            batch_input.append(rerank_ans)
+
+            # 执行batch推理
+            batch_output = llm.infer(batch_input)
+            # 合并两路召回的结果
+            line["answer_1"] = batch_output[0]
+            # bm召回的结果
+            line["answer_2"] = batch_output[1]
+            # 向量召回的结果
+            line["answer_3"] = batch_output[2]
+            # 多路召回重排序后的结果
+            line["answer_4"] = batch_output[3]
+
+            line["answer_5"] = emb_ans
+            line["answer_6"] = bm25_ans
+            line["answer_7"] = rerank_ans
+
+            # 如果faiss检索和query的距离高于500,输出无答案
+            if faiss_min_score > 500:
+                line["answer_5"] = "无答案"
+            else:
+                line["answer_5"] = str(faiss_min_score)
+
+            with open(file="../knowledge_data/json/result.json", mode="w", encoding='utf-8') as json_dump_file:
+                json.dump(jdata, json_dump_file, ensure_ascii=False, indent=2)
+
+            end = time.time()
+            print("cost time: " + str(int(end - start) / 60))
